@@ -50,6 +50,8 @@ type Transaction struct {
 	Data []byte
 	// Signature of the transaction data
 	Signature []byte
+	// Transaction Nonce
+	Nonce uint64
 	// Transaction timestamp
 	Timestamp time.Time
 }
