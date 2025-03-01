@@ -1,0 +1,52 @@
+# Consensus DPoS Go Configuration
+
+# General configuration
+general:
+  # Data directory for blockchain data
+  dataDir: "./data"
+  # Log level (debug, info, warn, error)
+  logLevel: "info"
+  # Network identifier
+  networkID: "dpos-testnet"
+
+# Consensus parameters
+consensus:
+  # Number of blocks in an epoch
+  epochLength: 100
+  # Number of active validators
+  activeValidators: 21
+  # Minimum stake to become a validator (in smallest token units)
+  minimumStake: 1000000
+  # Unbonding period in seconds (14 days)
+  unbondingPeriod: 1209600
+  # Target block time in seconds
+  blockTimeTarget: 5
+  # Maximum blocks a validator can miss before being jailed
+  maxMissedBlocks: 50
+  # Slash rate for double signing (in basis points, 1000 = 10%)
+  doubleSignSlashRate: 1000
+  # Slash rate for downtime (in basis points, 100 = 1%)
+  downtimeSlashRate: 100
+  # Jail duration for downtime (in seconds, 24 hours)
+  downtimeJailDuration: 86400
+
+# P2P network configuration
+p2p:
+  # Address to listen for P2P connections
+  listenAddress: "0.0.0.0:26656"
+  # Seed nodes to connect to
+  peerSeeds:
+    - "seed1.example.com:26656"
+    - "seed2.example.com:26656"
+  # Maximum number of peers to connect to
+  maxPeers: 50
+
+# API server configuration
+api:
+  # Enable API server
+  enabled: true
+  # Address to listen for API connections
+  listenAddress: "0.0.0.0:8545"
+  # Allowed CORS origins
+  corsOrigins:
+    - "*"

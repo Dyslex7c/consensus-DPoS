@@ -1,4 +1,4 @@
-module github.com/Dyslex7c/consensus-DPoS.git
+module github.com/Dyslex7c/consensus-DPoS
 
 go 1.21.0
 
