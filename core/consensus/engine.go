@@ -22,16 +22,31 @@ type DPoSConfig struct {
 	MinValidatorStake uint64
 	// Maximum number of transactions per block
 	MaxTxPerBlock int
+	// Unbonding period in seconds
+	UnbondingPeriod uint64
+	// Maximum blocks a validator can miss before being jailed
+	MaxMissedBlocks uint32
+	// Percentage of stake slashed for double signing (basis points)
+	DoubleSignSlashRate uint16
+	// Percentage of stake slashed for downtime (basis points)
+	DowntimeSlashRate uint16
+	// Jail duration for downtime in seconds
+	DowntimeJailDuration uint64
 }
 
 // DefaultConfig returns the default DPoS configuration
 func DefaultConfig() *DPoSConfig {
 	return &DPoSConfig{
-		BlockInterval:     3 * time.Second,
-		ActiveValidators:  21,
-		EpochLength:       100,
-		MinValidatorStake: 1000,
-		MaxTxPerBlock:     500,
+		BlockInterval:        3 * time.Second,
+		ActiveValidators:     21,
+		EpochLength:          100,
+		MinValidatorStake:    1000,
+		MaxTxPerBlock:        500,
+		UnbondingPeriod:      60 * 60 * 24 * 7, // 7 days in seconds
+		MaxMissedBlocks:      10,
+		DoubleSignSlashRate:  1000,         // 10% in basis points
+		DowntimeSlashRate:    100,          // 1% in basis points
+		DowntimeJailDuration: 60 * 60 * 24, // 24 hours in seconds
 	}
 }
 
@@ -182,7 +197,8 @@ func (e *DPoSEngine) isMyTurn() bool {
 	}
 
 	// Check if we're the validator for this slot
-	return validators[slot].PublicKey.Equal(ourValidator.PublicKey)
+	// Compare public keys instead of IDs to match the types.go structure
+	return string(validators[slot].PublicKey) == string(ourValidator.PublicKey)
 }
 
 // ProposeBlock creates and proposes a new block
@@ -190,7 +206,7 @@ func (e *DPoSEngine) ProposeBlock(ctx context.Context) (*types.Block, error) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 
-	// Get the latest block height
+	// Get the latest block
 	latestBlock, err := e.blockchain.GetLatestBlock()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest block: %w", err)
@@ -199,59 +215,52 @@ func (e *DPoSEngine) ProposeBlock(ctx context.Context) (*types.Block, error) {
 	// Get pending transactions from the pool
 	pendingTxs := e.txPool.GetPendingTransactions(e.config.MaxTxPerBlock)
 
+	// Get our validator
+	ourValidator := e.blockchain.GetOurValidator()
+	if ourValidator == nil {
+		return nil, fmt.Errorf("failed to get our validator information")
+	}
+
 	// Create the new block
 	block := &types.Block{
-		Header: &types.BlockHeader{
-			Version:          1,
+		Header: types.BlockHeader{
 			Height:           latestBlock.Header.Height + 1,
-			PreviousHash:     latestBlock.Hash(),
-			Timestamp:        time.Now().UnixNano(),
-			ProposerID:       e.blockchain.GetOurValidator().ID,
-			TransactionCount: uint32(len(pendingTxs)),
+			PreviousHash:     latestBlock.CalculateHash(),
+			Timestamp:        time.Now(),
+			TransactionsRoot: calculateMerkleRoot(pendingTxs),
+			StateRoot:        []byte{}, // Will be populated later
+			Proposer:         ourValidator.PublicKey,
+			Epoch:            latestBlock.Header.Height/e.config.EpochLength + 1,
 		},
-		Transactions: pendingTxs,
+		Transactions:        pendingTxs,
+		ProposerSignature:   []byte{}, // Will be populated later
+		ValidatorSignatures: []types.ValidatorSignature{},
 	}
 
-	// Calculate the epoch
-	e.currentHeight = block.Header.Height
-	e.currentEpoch = e.currentHeight / e.config.EpochLength
+	// Calculate transaction merkle root
+	block.Header.TransactionsRoot = calculateMerkleRoot(pendingTxs)
 
-	// Check if we're at an epoch boundary
-	if e.currentHeight%e.config.EpochLength == 0 {
-		e.logger.Info("Reached epoch boundary", "epoch", e.currentEpoch)
-
-		// Rotate validators for the new epoch
-		err := e.validatorMgr.RotateValidators(e.currentEpoch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to rotate validators: %w", err)
-		}
-
-		// Add epoch metadata to the block
-		block.Header.EpochNumber = e.currentEpoch
-		block.Header.IsEpochBoundary = true
-
-		// Get the new active validator set and include in the block
-		activeValidators, err := e.validatorMgr.GetActiveValidators()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get active validators: %w", err)
-		}
-
-		// Store validator info in the block
-		block.Validators = activeValidators
-	} else {
-		block.Header.EpochNumber = e.currentEpoch
-		block.Header.IsEpochBoundary = false
+	// Update state and get state root
+	stateRoot, err := e.blockchain.CalculateStateRoot(pendingTxs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate state root: %w", err)
 	}
-
-	// Calculate merkle root for transactions
-	block.Header.MerkleRoot = block.CalculateMerkleRoot()
+	block.Header.StateRoot = stateRoot
 
 	// Sign the block
-	signature, err := e.blockchain.SignBlock(block)
+	signature, err := e.blockchain.SignBlock(&block.Header)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign block: %w", err)
 	}
-	block.Header.Signature = signature
+	block.ProposerSignature = signature
+
+	// Add our validator signature
+	validatorSig := types.ValidatorSignature{
+		ValidatorPublicKey: ourValidator.PublicKey,
+		Signature:          signature,
+		Timestamp:          time.Now(),
+	}
+	block.ValidatorSignatures = append(block.ValidatorSignatures, validatorSig)
 
 	e.logger.Info("Block proposed", "height", block.Header.Height, "txs", len(pendingTxs))
 
@@ -271,17 +280,17 @@ func (e *DPoSEngine) ValidateBlock(block *types.Block) error {
 	}
 
 	// Verify the previous hash
-	if !block.Header.PreviousHash.Equal(latestBlock.Hash()) {
+	if string(block.Header.PreviousHash) != string(latestBlock.CalculateHash()) {
 		return fmt.Errorf("invalid previous hash")
 	}
 
 	// Verify the block timestamp
-	if block.Header.Timestamp <= latestBlock.Header.Timestamp {
+	if block.Header.Timestamp.Before(latestBlock.Header.Timestamp) {
 		return fmt.Errorf("block timestamp must be greater than previous block")
 	}
 
 	// Verify block proposer is a valid validator
-	isValidator, err := e.validatorMgr.IsValidator(block.Header.ProposerID)
+	isValidator, err := e.validatorMgr.IsValidator(block.Header.Proposer)
 	if err != nil {
 		return fmt.Errorf("failed to verify proposer: %w", err)
 	}
@@ -300,39 +309,74 @@ func (e *DPoSEngine) ValidateBlock(block *types.Block) error {
 	}
 
 	// Calculate the expected block slot
-	blockTime := time.Unix(0, block.Header.Timestamp)
-	slot := (blockTime.Unix() / int64(e.config.BlockInterval.Seconds())) % int64(len(validators))
+	blockTime := block.Header.Timestamp.Unix()
+	slot := (blockTime / int64(e.config.BlockInterval.Seconds())) % int64(len(validators))
 
-	if !validators[slot].PublicKey.Equal(block.Header.ProposerID) {
+	if string(validators[slot].PublicKey) != string(block.Header.Proposer) {
 		return fmt.Errorf("not the proposer's turn")
 	}
 
-	// Verify the merkle root
-	calculatedRoot := block.CalculateMerkleRoot()
-	if !calculatedRoot.Equal(block.Header.MerkleRoot) {
-		return fmt.Errorf("invalid merkle root")
+	// Verify the transactions root
+	calculatedRoot := calculateMerkleRoot(block.Transactions)
+	if string(calculatedRoot) != string(block.Header.TransactionsRoot) {
+		return fmt.Errorf("invalid transactions root")
 	}
 
-	// Verify the epoch boundary logic
+	// Verify the epoch
 	expectedEpoch := block.Header.Height / e.config.EpochLength
-	if block.Header.EpochNumber != expectedEpoch {
+	if block.Header.Epoch != expectedEpoch {
 		return fmt.Errorf("invalid epoch number")
-	}
-
-	if block.Header.IsEpochBoundary != (block.Header.Height%e.config.EpochLength == 0) {
-		return fmt.Errorf("invalid epoch boundary flag")
 	}
 
 	// Verify all transactions
 	for _, tx := range block.Transactions {
-		if err := e.blockchain.ValidateTransaction(tx); err != nil {
+		if err := e.blockchain.ValidateTransaction(&tx); err != nil {
 			return fmt.Errorf("invalid transaction: %w", err)
 		}
 	}
 
-	// Verify the block signature
+	// Verify the proposer signature
 	if !e.blockchain.VerifyBlockSignature(block) {
 		return fmt.Errorf("invalid block signature")
+	}
+
+	// Verify validator signatures
+	if err := e.verifyValidatorSignatures(block); err != nil {
+		return fmt.Errorf("invalid validator signatures: %w", err)
+	}
+
+	return nil
+}
+
+// verifyValidatorSignatures verifies signatures from validators
+func (e *DPoSEngine) verifyValidatorSignatures(block *types.Block) error {
+	validators, err := e.validatorMgr.GetActiveValidators()
+	if err != nil {
+		return fmt.Errorf("failed to get active validators: %w", err)
+	}
+
+	// Create a map for easy lookup
+	validatorMap := make(map[string]*types.Validator)
+	for i, v := range validators {
+		validatorMap[string(v.PublicKey)] = &validators[i]
+	}
+
+	// Verify each signature
+	for _, sig := range block.ValidatorSignatures {
+		// Check if validator is in the active set
+		validator, exists := validatorMap[string(sig.ValidatorPublicKey)]
+		if !exists {
+			return fmt.Errorf("signature from non-active validator")
+		}
+
+		// Verify signature
+		if !e.blockchain.VerifySignature(
+			sig.ValidatorPublicKey,
+			block.CalculateHash(),
+			sig.Signature,
+		) {
+			return fmt.Errorf("invalid signature from validator %x", validator.Address)
+		}
 	}
 
 	return nil
@@ -352,18 +396,20 @@ func (e *DPoSEngine) FinalizeBlock(block *types.Block) error {
 
 	// Remove the block's transactions from the transaction pool
 	for _, tx := range block.Transactions {
-		e.txPool.RemoveTransaction(tx.Hash())
+		e.txPool.RemoveTransaction(tx.ID)
 	}
 
 	// Update state with the transactions
 	for _, tx := range block.Transactions {
-		if err := e.blockchain.ApplyTransaction(tx); err != nil {
-			e.logger.Error("Failed to apply transaction", "tx", tx.Hash(), "error", err)
+		if err := e.blockchain.ApplyTransaction(&tx); err != nil {
+			e.logger.Error("Failed to apply transaction", "tx", fmt.Sprintf("%x", tx.ID), "error", err)
 		}
 	}
 
-	// If this is an epoch boundary, finalize the validator rotation
-	if block.Header.IsEpochBoundary {
+	// If this is an epoch boundary, update validators and process rewards
+	if block.Header.Height%e.config.EpochLength == 0 {
+		e.logger.Info("Reached epoch boundary", "epoch", block.Header.Epoch)
+
 		// Process rewards for the previous epoch
 		if err := e.stakeMgr.ProcessRewards(block); err != nil {
 			e.logger.Error("Failed to process rewards", "error", err)
@@ -373,6 +419,11 @@ func (e *DPoSEngine) FinalizeBlock(block *types.Block) error {
 		if err := e.stakeMgr.CompleteUnbonding(); err != nil {
 			e.logger.Error("Failed to complete unbonding", "error", err)
 		}
+
+		// Rotate validators for the new epoch
+		if err := e.validatorMgr.RotateValidators(block.Header.Epoch); err != nil {
+			e.logger.Error("Failed to rotate validators", "error", err)
+		}
 	}
 
 	e.logger.Info("Block finalized", "height", block.Header.Height, "txs", len(block.Transactions))
@@ -380,7 +431,7 @@ func (e *DPoSEngine) FinalizeBlock(block *types.Block) error {
 	// Update current height and epoch
 	e.mutex.Lock()
 	e.currentHeight = block.Header.Height
-	e.currentEpoch = e.currentHeight / e.config.EpochLength
+	e.currentEpoch = block.Header.Epoch
 	e.mutex.Unlock()
 
 	return nil
@@ -399,4 +450,19 @@ func (e *DPoSEngine) ProcessTransaction(tx *types.Transaction) error {
 	}
 
 	return nil
+}
+
+// Helper function to calculate merkle root
+func calculateMerkleRoot(txs []types.Transaction) []byte {
+	if len(txs) == 0 {
+		return []byte{}
+	}
+
+	// Simple implementation for now - in production, implement a real Merkle tree
+	hashData := make([]byte, 0)
+	for _, tx := range txs {
+		hashData = append(hashData, tx.ID...)
+	}
+
+	return utils.Hash(hashData)
 }
