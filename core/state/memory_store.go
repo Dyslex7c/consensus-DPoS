@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/yourusername/consensus-dpos-go/core/types"
-	"github.com/yourusername/consensus-dpos-go/crypto"
+	"github.com/Dyslex7c/consensus-DPoS/core/types"
+	"github.com/Dyslex7c/consensus-DPoS/crypto"
 )
 
 var (
