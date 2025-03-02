@@ -74,6 +74,8 @@ const (
 
 // Validator represents a node that participates in consensus
 type Validator struct {
+	// Validator's address (usually derived from public key)
+	Address []byte
 	// Validator's public key
 	PublicKey []byte
 	// Validator's voting power (proportional to stake)
