@@ -2,6 +2,8 @@ package types
 
 import (
 	"time"
+
+	"github.com/Dyslex7c/consensus-DPoS/utils"
 )
 
 // Block represents a single block in the blockchain
@@ -14,6 +16,55 @@ type Block struct {
 	ProposerSignature []byte
 	// Signatures from validators who confirmed this block
 	ValidatorSignatures []ValidatorSignature
+}
+
+// CalculateHash calculates and returns the hash of the block
+// This is used for block verification and as the PreviousHash in the next block
+func (b *Block) CalculateHash() []byte {
+	// Create a slice to hold all data to be hashed
+	var data []byte
+
+	// Add header fields to the data
+	// Convert uint64 to bytes
+	heightBytes := make([]byte, 8)
+	utils.PutUint64(heightBytes, b.Header.Height)
+	data = append(data, heightBytes...)
+
+	// Add previous hash
+	data = append(data, b.Header.PreviousHash...)
+
+	// Add timestamp as bytes
+	timeBytes := []byte(b.Header.Timestamp.String())
+	data = append(data, timeBytes...)
+
+	// Add transactions root
+	data = append(data, b.Header.TransactionsRoot...)
+
+	// Add state root
+	data = append(data, b.Header.StateRoot...)
+
+	// Add proposer
+	data = append(data, b.Header.Proposer...)
+
+	// Add epoch
+	epochBytes := make([]byte, 8)
+	utils.PutUint64(epochBytes, b.Header.Epoch)
+	data = append(data, epochBytes...)
+
+	// Add transaction IDs to maintain deterministic hashing
+	// without including entire transactions for efficiency
+	for _, tx := range b.Transactions {
+		data = append(data, tx.ID...)
+	}
+
+	// Add proposer signature
+	data = append(data, b.ProposerSignature...)
+
+	// We don't include validator signatures in the hash calculation
+	// as they are collected after the block is proposed
+
+	// Calculate the final hash using the utils.Hash function
+	return utils.Hash(data)
 }
 
 // BlockHeader contains metadata about a block
