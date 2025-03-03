@@ -35,6 +35,7 @@ type StakeManagerImpl struct {
 	config            *StakeManagerConfig
 	delegations       map[string][]*types.Stake // delegator -> stakes
 	validatorStakes   map[string][]*types.Stake // validator -> stakes
+	stakesByValidator map[string][]types.Stake
 	unbondingRequests []*types.UnbondingRequest
 	storage           StakeStorage
 	mutex             sync.RWMutex

@@ -1,6 +1,8 @@
 package consensus
 
 import (
+	"fmt"
+
 	"github.com/Dyslex7c/consensus-DPoS/core/types"
 )
 
@@ -32,6 +34,34 @@ type StakeManager interface {
 	Delegate(delegator, validator []byte, amount uint64) error
 	// Undelegate begins the unbonding process for a stake
 	Undelegate(delegator, validator []byte, amount uint64) error
+	// GetDelegatedStake returns the total stake amount for a validator
+	GetDelegatedStake(key []byte) (uint64, error)
+}
+
+// func (s StakeManager) GetDelegatedStake(key []byte) (any, any) {
+// 	panic("unimplemented")
+// }
+
+func (sm *StakeManagerImpl) GetStakesByValidator(validator []byte) ([]types.Stake, error) {
+	key := string(validator)
+	if stakes, ok := sm.stakesByValidator[key]; ok {
+		return stakes, nil
+	}
+	// No stakes found is not necessarily an error—return an empty slice.
+	return []types.Stake{}, nil
+}
+
+func (sm *StakeManagerImpl) GetDelegatedStake(key []byte) (uint64, error) {
+	stakes, err := sm.GetStakesByValidator(key)
+	if err != nil {
+		return 0, fmt.Errorf("failed to retrieve stakes for validator: %w", err)
+	}
+
+	var total uint64
+	for _, stake := range stakes {
+		total += stake.Amount
+	}
+	return total, nil
 }
 
 // TxPool defines the interface for the transaction pool
