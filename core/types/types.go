@@ -187,6 +187,20 @@ type Stake struct {
 	UnbondingCompleteAt time.Time
 }
 
+// UnbondingRequest represents a request to undelegate tokens
+type UnbondingRequest struct {
+	// Delegator's address as string key (derived from public key)
+	DelegatorKey string
+	// Validator's address as string key (derived from public key)
+	ValidatorKey string
+	// Amount to undelegate
+	Amount uint64
+	// Unix timestamp when the unbonding will be completed
+	CompletionTime int64
+	// Unix timestamp when the unbonding request was created
+	CreatedAt int64
+}
+
 // ValidatorSignature represents a validator's signature on a block
 type ValidatorSignature struct {
 	// Validator's public key
