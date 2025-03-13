@@ -7,6 +7,7 @@ import (
 
 	"github.com/Dyslex7c/consensus-DPoS/core/types"
 	"github.com/Dyslex7c/consensus-DPoS/crypto"
+	"github.com/Dyslex7c/consensus-DPoS/storage"
 )
 
 var (
@@ -20,9 +21,10 @@ var (
 	ErrInvalidValidatorAddress = errors.New("invalid validator address")
 )
 
-// MemoryStateStore implements the StateStore interface with in-memory storage
-type MemoryStateStore struct {
+// MemoryStore implements StateStore with persistent backing
+type MemoryStore struct {
 	mu sync.RWMutex
+	db storage.DB
 
 	// Account balances
 	balances map[string]uint64
@@ -43,9 +45,10 @@ type MemoryStateStore struct {
 	processedTxs map[string]struct{}
 }
 
-// NewMemoryStateStore creates a new in-memory state store
-func NewMemoryStateStore() *MemoryStateStore {
-	return &MemoryStateStore{
+// NewMemoryStore creates a new memory state store with database backing
+func NewMemoryStore(db storage.DB) *MemoryStore {
+	return &MemoryStore{
+		db:                     db,
 		balances:               make(map[string]uint64),
 		validators:             make(map[string]*types.Validator),
 		stakes:                 make(map[string]*types.Stake),
@@ -55,6 +58,49 @@ func NewMemoryStateStore() *MemoryStateStore {
 	}
 }
 
+// Initialize loads state from the database
+func (m *MemoryStore) Initialize() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Load balances
+	balancesData, err := m.db.Get([]byte("balances"))
+	if err == nil {
+		// Deserialize balances data
+		// Implementation depends on your serialization format
+		// This is a placeholder
+	}
+
+	// Load validators
+	validatorsData, err := m.db.Get([]byte("validators"))
+	if err == nil {
+		// Deserialize validators data
+	}
+
+	// Load stakes
+	stakesData, err := m.db.Get([]byte("stakes"))
+	if err == nil {
+		// Deserialize stakes data
+	}
+
+	// Load block state
+	blockHeightData, err := m.db.Get([]byte("latest_block_height"))
+	if err == nil {
+		// Parse block height
+	}
+
+	blockHashData, err := m.db.Get([]byte("latest_block_hash"))
+	if err == nil {
+		m.latestBlockHash = blockHashData
+	}
+
+	// Load processed transactions
+	// This might be too large for a single key-value pair
+	// Consider using a prefix scan instead
+
+	return nil
+}
+
 // Helper to create a stake key
 func makeStakeKey(delegator, validator []byte) string {
 	return fmt.Sprintf("%s:%s", crypto.HashToHex(delegator), crypto.HashToHex(validator))
@@ -62,7 +108,7 @@ func makeStakeKey(delegator, validator []byte) string {
 
 // Account methods
 
-func (m *MemoryStateStore) GetBalance(address []byte) (uint64, error) {
+func (m *MemoryStore) GetBalance(address []byte) (uint64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -70,7 +116,7 @@ func (m *MemoryStateStore) GetBalance(address []byte) (uint64, error) {
 	return m.balances[key], nil // Returns 0 if not found
 }
 
-func (m *MemoryStateStore) SetBalance(address []byte, amount uint64) error {
+func (m *MemoryStore) SetBalance(address []byte, amount uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -79,7 +125,7 @@ func (m *MemoryStateStore) SetBalance(address []byte, amount uint64) error {
 	return nil
 }
 
-func (m *MemoryStateStore) TransferBalance(from, to []byte, amount uint64) error {
+func (m *MemoryStore) TransferBalance(from, to []byte, amount uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -99,7 +145,7 @@ func (m *MemoryStateStore) TransferBalance(from, to []byte, amount uint64) error
 
 // Validator methods
 
-func (m *MemoryStateStore) GetValidators() ([]*types.Validator, error) {
+func (m *MemoryStore) GetValidators() ([]*types.Validator, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -111,7 +157,7 @@ func (m *MemoryStateStore) GetValidators() ([]*types.Validator, error) {
 	return validators, nil
 }
 
-func (m *MemoryStateStore) GetValidator(address []byte) (*types.Validator, error) {
+func (m *MemoryStore) GetValidator(address []byte) (*types.Validator, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -124,7 +170,7 @@ func (m *MemoryStateStore) GetValidator(address []byte) (*types.Validator, error
 	return validator.Clone(), nil
 }
 
-func (m *MemoryStateStore) AddValidator(validator *types.Validator) error {
+func (m *MemoryStore) AddValidator(validator *types.Validator) error {
 	if validator == nil || len(validator.Address) == 0 {
 		return ErrInvalidValidatorAddress
 	}
@@ -141,7 +187,7 @@ func (m *MemoryStateStore) AddValidator(validator *types.Validator) error {
 	return nil
 }
 
-func (m *MemoryStateStore) UpdateValidator(validator *types.Validator) error {
+func (m *MemoryStore) UpdateValidator(validator *types.Validator) error {
 	if validator == nil || len(validator.Address) == 0 {
 		return ErrInvalidValidatorAddress
 	}
@@ -158,7 +204,7 @@ func (m *MemoryStateStore) UpdateValidator(validator *types.Validator) error {
 	return nil
 }
 
-func (m *MemoryStateStore) RemoveValidator(address []byte) error {
+func (m *MemoryStore) RemoveValidator(address []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -173,7 +219,7 @@ func (m *MemoryStateStore) RemoveValidator(address []byte) error {
 
 // Stake methods
 
-func (m *MemoryStateStore) GetTotalStake() (uint64, error) {
+func (m *MemoryStore) GetTotalStake() (uint64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -185,7 +231,7 @@ func (m *MemoryStateStore) GetTotalStake() (uint64, error) {
 	return total, nil
 }
 
-func (m *MemoryStateStore) GetStake(delegator, validator []byte) (*types.Stake, error) {
+func (m *MemoryStore) GetStake(delegator, validator []byte) (*types.Stake, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -198,7 +244,7 @@ func (m *MemoryStateStore) GetStake(delegator, validator []byte) (*types.Stake, 
 	return stake.Clone(), nil
 }
 
-func (m *MemoryStateStore) AddStake(stake *types.Stake) error {
+func (m *MemoryStore) AddStake(stake *types.Stake) error {
 	if stake == nil {
 		return errors.New("stake cannot be nil")
 	}
@@ -228,7 +274,7 @@ func (m *MemoryStateStore) AddStake(stake *types.Stake) error {
 	return nil
 }
 
-func (m *MemoryStateStore) UpdateStake(stake *types.Stake) error {
+func (m *MemoryStore) UpdateStake(stake *types.Stake) error {
 	if stake == nil {
 		return errors.New("stake cannot be nil")
 	}
@@ -253,7 +299,7 @@ func (m *MemoryStateStore) UpdateStake(stake *types.Stake) error {
 	return nil
 }
 
-func (m *MemoryStateStore) RemoveStake(delegator, validator []byte) error {
+func (m *MemoryStore) RemoveStake(delegator, validator []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -290,7 +336,7 @@ func (m *MemoryStateStore) RemoveStake(delegator, validator []byte) error {
 	return nil
 }
 
-func (m *MemoryStateStore) GetValidatorTotalStake(validator []byte) (uint64, error) {
+func (m *MemoryStore) GetValidatorTotalStake(validator []byte) (uint64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -298,7 +344,7 @@ func (m *MemoryStateStore) GetValidatorTotalStake(validator []byte) (uint64, err
 	return m.validatorTotalStakes[validatorKey], nil
 }
 
-func (m *MemoryStateStore) GetDelegatorStakes(delegator []byte) ([]*types.Stake, error) {
+func (m *MemoryStore) GetDelegatorStakes(delegator []byte) ([]*types.Stake, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -317,14 +363,14 @@ func (m *MemoryStateStore) GetDelegatorStakes(delegator []byte) ([]*types.Stake,
 
 // Block state methods
 
-func (m *MemoryStateStore) GetLatestBlockHeight() (uint64, error) {
+func (m *MemoryStore) GetLatestBlockHeight() (uint64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	return m.latestBlockHeight, nil
 }
 
-func (m *MemoryStateStore) SetLatestBlockHeight(height uint64) error {
+func (m *MemoryStore) SetLatestBlockHeight(height uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -332,7 +378,7 @@ func (m *MemoryStateStore) SetLatestBlockHeight(height uint64) error {
 	return nil
 }
 
-func (m *MemoryStateStore) GetLatestBlockHash() ([]byte, error) {
+func (m *MemoryStore) GetLatestBlockHash() ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -345,7 +391,7 @@ func (m *MemoryStateStore) GetLatestBlockHash() ([]byte, error) {
 	return hashCopy, nil
 }
 
-func (m *MemoryStateStore) SetLatestBlockHash(hash []byte) error {
+func (m *MemoryStore) SetLatestBlockHash(hash []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -361,7 +407,7 @@ func (m *MemoryStateStore) SetLatestBlockHash(hash []byte) error {
 
 // Transaction methods
 
-func (m *MemoryStateStore) GetProcessedTransaction(txID []byte) (bool, error) {
+func (m *MemoryStore) GetProcessedTransaction(txID []byte) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -369,7 +415,7 @@ func (m *MemoryStateStore) GetProcessedTransaction(txID []byte) (bool, error) {
 	return exists, nil
 }
 
-func (m *MemoryStateStore) MarkTransactionProcessed(txID []byte) error {
+func (m *MemoryStore) MarkTransactionProcessed(txID []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -379,18 +425,43 @@ func (m *MemoryStateStore) MarkTransactionProcessed(txID []byte) error {
 
 // State operation methods
 
-func (m *MemoryStateStore) Commit() error {
-	// In-memory implementation doesn't need to commit
-	// But we could add snapshot functionality here
+func (m *MemoryStore) Commit() error {
+	// Persist current state to the database
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Serialize and save balances
+	// Implementation depends on your serialization format
+
+	// Serialize and save validators
+
+	// Serialize and save stakes
+
+	// Save block state
+	if m.latestBlockHeight > 0 {
+		// Save latest block height
+	}
+
+	if m.latestBlockHash != nil {
+		err := m.db.Put([]byte("latest_block_hash"), m.latestBlockHash)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Save processed transactions
+	// This might be too large for a single key-value pair
+	// Consider using batches or multiple keys
+
 	return nil
 }
 
-func (m *MemoryStateStore) Rollback() error {
-	// Without snapshot support, rollback isn't supported in this simple implementation
-	return errors.New("rollback not supported in basic memory store")
+func (m *MemoryStore) Rollback() error {
+	// Reload state from the last committed state in the database
+	return m.Initialize()
 }
 
-func (m *MemoryStateStore) Reset() error {
+func (m *MemoryStore) Reset() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -403,15 +474,18 @@ func (m *MemoryStateStore) Reset() error {
 	m.latestBlockHeight = 0
 	m.latestBlockHash = nil
 
+	// Clear database
+	// This is a placeholder. You might want to implement this differently
+
 	return nil
 }
 
 // Clone makes a deep copy of the state store
-func (m *MemoryStateStore) Clone() (StateStore, error) {
+func (m *MemoryStore) Clone() (StateStore, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	clone := NewMemoryStateStore()
+	clone := NewMemoryStore(m.db)
 
 	// Copy balances
 	for k, v := range m.balances {

@@ -38,12 +38,11 @@ type StateStore interface {
 	GetProcessedTransaction(txID []byte) (bool, error)
 	MarkTransactionProcessed(txID []byte) error
 
-	// State operation methods
+	// State operations
+	Initialize() error
 	Commit() error
 	Rollback() error
 	Reset() error
-
-	// For snapshots/forks
 	Clone() (StateStore, error)
 }
 
