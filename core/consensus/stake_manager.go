@@ -42,6 +42,23 @@ type StakeManagerImpl struct {
 	logger            *utils.Logger
 }
 
+// GetStakesByDelegator implements StakeManager.
+// GetStakesByDelegator returns all delegations for a delegator as a slice of values
+func (sm *StakeManagerImpl) GetStakesByDelegator(delegator []byte) ([]types.Stake, error) {
+	pointerStakes, err := sm.GetDelegations(delegator)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert slice of pointers to slice of values
+	valueStakes := make([]types.Stake, len(pointerStakes))
+	for i, stake := range pointerStakes {
+		valueStakes[i] = *stake
+	}
+
+	return valueStakes, nil
+}
+
 // StakeStorage interface for persistence
 type StakeStorage interface {
 	SaveDelegations(map[string][]*types.Stake) error

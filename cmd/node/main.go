@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/Dyslex7c/consensus-DPoS/config"
 	"github.com/Dyslex7c/consensus-DPoS/core/consensus"
@@ -68,7 +69,7 @@ func main() {
 	defer db.Close()
 
 	// Initialize state
-	stateStore := state.NewMemoryStateStore()
+	stateStore := state.NewMemoryStore(db)
 	err = stateStore.Initialize()
 	if err != nil {
 		logger.Error("Failed to initialize state", "error", err)
@@ -96,9 +97,17 @@ func main() {
 		logger:     logger,
 	}
 
+	stakeManagerConfig := &consensus.StakeManagerConfig{
+		MinStakeAmount:        cfg.Consensus.MinimumStake,
+		UnbondingPeriod:       time.Duration(cfg.Consensus.UnbondingPeriod) * time.Second,
+		RewardPerBlock:        1000, // Set appropriate reward value
+		RewardDistribution:    0.8,  // 80% to delegators, 20% to validators
+		MaxDelegationsPerUser: 16,   // Set appropriate limit
+	}
+
 	// Create stake manager
 	stakeManager := consensus.NewStakeManager(
-		&cfg.Consensus, // Use config from loaded config
+		stakeManagerConfig,
 		&StakeStorageImpl{db: db},
 		logger,
 	)
@@ -108,9 +117,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	validatorConfig := &consensus.ValidatorManagerConfig{
+		MaxValidators:          int(cfg.Consensus.ActiveValidators * 5), // Example: 5x the active count
+		ActiveValidatorsCount:  int(cfg.Consensus.ActiveValidators),
+		MinStake:               cfg.Consensus.MinimumStake,
+		UnbondingTime:          time.Duration(cfg.Consensus.UnbondingPeriod) * time.Second,
+		SlashingPenaltyPercent: int(cfg.Consensus.DoubleSignSlashRate / 100), // Convert basis points to percent
+		JailTime:               time.Duration(cfg.Consensus.DowntimeJailDuration) * time.Second,
+	}
+
 	// Create validator manager
 	validatorManager := consensus.NewValidatorManager(
-		&cfg.Consensus, // Use config from loaded config
+		validatorConfig, // Use config from loaded config
 		stakeManager,
 		&ValidatorStorageImpl{db: db},
 		logger,
@@ -123,7 +141,7 @@ func main() {
 
 	// Create consensus engine
 	engine := consensus.NewDPoSEngine(
-		&cfg.Consensus, // Use config from loaded config
+		consensus.ConvertConsensusParams(&cfg.Consensus),
 		validatorManager,
 		stakeManager,
 		txPool,
@@ -159,6 +177,25 @@ type BlockchainImpl struct {
 	logger     *utils.Logger
 }
 
+// CalculateStateRoot implements consensus.Blockchain.
+func (b *BlockchainImpl) CalculateStateRoot(txs []types.Transaction) ([]byte, error) {
+	panic("unimplemented")
+}
+
+// GetBlockByHeight implements consensus.Blockchain.
+func (b *BlockchainImpl) GetBlockByHeight(height uint64) (*types.Block, error) {
+	panic("unimplemented")
+}
+
+// VerifySignature implements consensus.Blockchain.
+func (b *BlockchainImpl) VerifySignature(publicKey []byte, data []byte, signature []byte) bool {
+	panic("unimplemented")
+}
+
+func (p *TxPoolImpl) Count() int {
+	return 0
+}
+
 func (b *BlockchainImpl) GetLatestBlock() (*types.Block, error) {
 	// Implementation omitted for brevity
 	return nil, nil
@@ -179,7 +216,7 @@ func (b *BlockchainImpl) ApplyTransaction(tx *types.Transaction) error {
 	return nil
 }
 
-func (b *BlockchainImpl) SignBlock(block *types.Block) ([]byte, error) {
+func (b *BlockchainImpl) SignBlock(block *types.BlockHeader) ([]byte, error) {
 	// Implementation omitted for brevity
 	return nil, nil
 }
@@ -199,16 +236,20 @@ type TxPoolImpl struct {
 	logger     *utils.Logger
 }
 
+func (p *TxPoolImpl) GetTransaction(txID []byte) (*types.Transaction, error) {
+	panic("unimplemented")
+}
+
 func (p *TxPoolImpl) AddTransaction(tx *types.Transaction) error {
 	// Implementation omitted for brevity
 	return nil
 }
 
-func (p *TxPoolImpl) RemoveTransaction(hash types.Hash) {
+func (p *TxPoolImpl) RemoveTransaction(hash []byte) {
 	// Implementation omitted for brevity
 }
 
-func (p *TxPoolImpl) GetPendingTransactions(limit int) []*types.Transaction {
+func (p *TxPoolImpl) GetPendingTransactions(limit int) []types.Transaction {
 	// Implementation omitted for brevity
 	return nil
 }

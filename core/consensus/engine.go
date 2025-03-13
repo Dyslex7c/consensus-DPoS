@@ -50,6 +50,21 @@ func DefaultConfig() *DPoSConfig {
 	}
 }
 
+func ConvertConsensusParams(params *types.ConsensusParams) *DPoSConfig {
+	return &DPoSConfig{
+		BlockInterval:        time.Duration(params.BlockTimeTarget) * time.Second,
+		ActiveValidators:     int(params.ActiveValidators),
+		EpochLength:          params.EpochLength,
+		MinValidatorStake:    params.MinimumStake, // Notice the name difference
+		MaxTxPerBlock:        500,                 // Default value as it's missing in ConsensusParams
+		UnbondingPeriod:      params.UnbondingPeriod,
+		MaxMissedBlocks:      params.MaxMissedBlocks,
+		DoubleSignSlashRate:  params.DoubleSignSlashRate,
+		DowntimeSlashRate:    params.DowntimeSlashRate,
+		DowntimeJailDuration: params.DowntimeJailDuration,
+	}
+}
+
 // DPoSEngine implements the DPoS consensus algorithm
 type DPoSEngine struct {
 	config        *DPoSConfig
